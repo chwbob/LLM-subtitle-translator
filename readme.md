@@ -18,7 +18,8 @@
 4. **Resilient Operation**:
    - Gracefully handles network issues and API failures
    - Continuously saves progress to prevent loss of work
-   - Maintains original text when translation fails to ensure no content is lost## How It Works
+   - Maintains original text when translation fails to ensure no content is lost
+## How It Works
 
 ### Intelligent Context Processing
 
@@ -118,7 +119,7 @@ By using a sophisticated batching system with contextual overlap, the translator
 
 ### Method 2: Using Pre-built Executable
 
-1. Download the latest release from the [Releases](https://github.com/yourusername/LLM_subtitle_translator/releases) page
+1. Download the latest release from the [Releases](https://github.com/chwbob/LLM-subtitle-translator/releases/tag/V1.1.3) page
 2. - For Windows users, Run `LLM_SubtitleTranslator.exe`
    - For Macos users with x86 CPU, Run `LLM_SubtitleTranslator_X86.dmg`
    - For Macos users with ARM CPU, Run `LLM_SubtitleTranslator_ARM64.dmg`
@@ -167,7 +168,6 @@ The application offers several customization options:
 - **Show Original**: Keep original text below translation
 - **Clean Punctuation**: Replace punctuation with spaces for cleaner appearance
 - **Additional Context**: Provide extra information for better translation (e.g., "This is a sci-fi movie")
-- **Batch Size**: Control how many lines are processed in each API request (default: 30)
 
 ## Configuration
 
