@@ -103,7 +103,7 @@ By using a sophisticated batching system with contextual overlap, the translator
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/LLM_subtitle_translator.git
+   git clone https://github.com/chwbob/LLM_subtitle_translator.git
    cd LLM_subtitle_translator
    ```
 
@@ -285,14 +285,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE.txt) 
 ---
 
 <div align="center">
-  <p>Made with ❤️ by <a href="https://github.com/chwbob">NeymarBob</a></p>
+  <p>Made with ❤️ by <a href="https://github.com/chwbob">NeymarBob-dimension door sub groupe</a></p>
   <p>
     <a href="https://github.com/chwbob">GitHub</a> •
     <a href="https://weibo.com/u/7160503463">Weibo</a> •
     <a href="https://space.bilibili.com/473365892?spm_id_from=333.1007.0.0">Bilibili</a> •
     <a href="https://www.douban.com/people/220499548/?_i=23857721YS6WZ-">Douban</a> •
     <a href="https://www.xiaohongshu.com/user/profile/64705581000000001203401f">RedNote</a> •
-    <a href="https://mp.weixin.qq.com/s/OPPAC4fezwpEaC8Sl2y-aw">Wechat Official Account</a> 
+    <a href="https://mp.weixin.qq.com/s/OPPAC4fezwpEaC8Sl2y-aw">Wechat Official Account(鲍勃的小屋)</a> 
 
   </p>
 </div>
