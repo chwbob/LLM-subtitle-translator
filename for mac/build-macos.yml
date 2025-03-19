@@ -1,0 +1,223 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install create-dmg
+        run: |
+          brew install create-dmg
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Create Qt Disabler Module
+        run: |
+          mkdir -p qt_disabler
+          cat > qt_disabler/__init__.py << 'EOF'
+          import os
+          
+          # Disable Qt services that might cause issues
+          os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+          os.environ['QT_ACCESSIBILITY'] = '0'
+          os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.*=false'
+          os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'
+          os.environ['QT_SCALE_FACTOR'] = '1'
+          os.environ['QT_BEARER_POLL_TIMEOUT'] = '-1'
+          os.environ['QT_NO_GLIB'] = '1'
+          os.environ['QT_NO_DBUS'] = '1'
+          
+          print("Qt services disabled via environment variables")
+          EOF
+
+      - name: Install dependencies for ARM64
+        run: |
+          python -m pip install --upgrade pip
+          pip install py2app PyQt6 PyQt6-Qt6 setuptools
+          pip install -r requirements.txt
+
+      - name: Build ARM64 Application
+        run: |
+          # Create setup.py for py2app
+          cat > setup.py << 'EOF'
+          from setuptools import setup
+          import os
+          
+          assets_files = []
+          for root, dirs, files in os.walk('assets'):
+              for file in files:
+                  assets_files.append(os.path.join(root, file))
+
+          
+          APP = ['subtitle_translator.py']
+          DATA_FILES = [('assets', assets_files), ('qt_disabler', ['qt_disabler/__init__.py'])]
+          OPTIONS = {
+              'argv_emulation': True,
+              'packages': ['PyQt6', 'qt_disabler'],
+              'includes': ['PyQt6.QtCore', 'PyQt6.QtWidgets', 'PyQt6.QtGui'],
+              'excludes': ['tkinter', 'matplotlib', 'PyQt5'],
+              'plist': {
+                  'CFBundleName': 'SubtitleTranslator',
+                  'CFBundleDisplayName': 'SubtitleTranslator',
+                  'CFBundleIdentifier': 'com.llm.subtitletranslator',
+                  'CFBundleVersion': '1.0.0',
+                  'CFBundleShortVersionString': '1.0.0',
+                  'NSHumanReadableCopyright': 'Copyright © 2024',
+              },
+              'iconfile': 'assets/icon.icns',
+          }
+          
+          setup(
+              app=APP,
+              data_files=DATA_FILES,
+              options={'py2app': OPTIONS},
+              setup_requires=['py2app'],
+          )
+          EOF
+          
+          # Create qt.conf to help Qt find its plugins
+          mkdir -p dist/arm64
+          
+          # Build ARM64 app
+          ARCHFLAGS="-arch arm64" python setup.py py2app --dist-dir=dist/arm64
+          
+          # Check architecture of the built app
+          file "dist/arm64/SubtitleTranslator.app/Contents/MacOS/SubtitleTranslator"
+          
+          # Create DMG for ARM64
+          create-dmg \
+            --volname "SubtitleTranslator-ARM64" \
+            --volicon "assets/icon.icns" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "SubtitleTranslator.app" 200 190 \
+            --hide-extension "SubtitleTranslator.app" \
+            --app-drop-link 600 185 \
+            "dist/SubtitleTranslator-ARM64.dmg" \
+            "dist/arm64/SubtitleTranslator.app" \
+          || echo "DMG creation may have warnings, continuing..."
+
+      - name: Upload ARM64 DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubtitleTranslator-ARM64-dmg
+          path: dist/SubtitleTranslator-ARM64.dmg
+
+      - name: Build Intel x86_64 Application
+        run: |
+          # Create a separate directory for Intel build
+          mkdir -p intel_build
+          cd intel_build
+          
+          # Create a virtual environment specifically for x86_64 build
+          arch -x86_64 python -m venv venv_x86
+          source venv_x86/bin/activate
+          
+          # Install dependencies with x86_64 architecture
+          arch -x86_64 pip install --upgrade pip
+          arch -x86_64 pip install py2app PyQt6 PyQt6-Qt6 setuptools
+          arch -x86_64 pip install -r ../requirements.txt
+          
+          # Copy qt_disabler module
+          mkdir -p qt_disabler
+          cp ../qt_disabler/__init__.py qt_disabler/
+          
+          # Copy main script and assets
+          cp ../subtitle_translator.py .
+          cp -r ../assets .
+          
+          # Create setup.py for py2app
+          cat > setup.py << 'EOF'
+          from setuptools import setup
+          import os
+          
+          assets_files = []
+          for root, dirs, files in os.walk('assets'):
+              for file in files:
+                  assets_files.append(os.path.join(root, file))
+          
+          APP = ['subtitle_translator.py']
+          DATA_FILES = [('assets', assets_files), ('qt_disabler', ['qt_disabler/__init__.py'])]
+          OPTIONS = {
+              'argv_emulation': True,
+              'packages': ['PyQt6', 'qt_disabler'],
+              'includes': ['PyQt6.QtCore', 'PyQt6.QtWidgets', 'PyQt6.QtGui'],
+              'excludes': ['tkinter', 'matplotlib', 'PyQt5'],
+              'plist': {
+                  'CFBundleName': 'SubtitleTranslator',
+                  'CFBundleDisplayName': 'SubtitleTranslator',
+                  'CFBundleIdentifier': 'com.llm.subtitletranslator',
+                  'CFBundleVersion': '1.0.0',
+                  'CFBundleShortVersionString': '1.0.0',
+                  'NSHumanReadableCopyright': 'Copyright © 2024',
+              },
+              'iconfile': 'assets/icon.icns',
+          }
+          
+          setup(
+              app=APP,
+              data_files=DATA_FILES,
+              options={'py2app': OPTIONS},
+              setup_requires=['py2app'],
+          )
+          EOF
+          
+          # Create qt.conf to help Qt find its plugins
+          mkdir -p dist
+          
+          # Set environment variables to disable Qt services
+          export QT_QPA_PLATFORM=offscreen
+          export QT_ACCESSIBILITY=0
+          export QT_LOGGING_RULES="*.debug=false;qt.qpa.*=false"
+          export QT_ENABLE_HIGHDPI_SCALING=0
+          export QT_SCALE_FACTOR=1
+          export QT_BEARER_POLL_TIMEOUT=-1
+          export QT_NO_GLIB=1
+          export QT_NO_DBUS=1
+          
+          # Build x86_64 app with explicit architecture flags
+          arch -x86_64 python setup.py py2app
+          
+          # Verify the architecture of the built app
+          file "dist/SubtitleTranslator.app/Contents/MacOS/SubtitleTranslator"
+          otool -L "dist/SubtitleTranslator.app/Contents/MacOS/SubtitleTranslator"
+          
+          # Check Qt libraries architecture
+          file "dist/SubtitleTranslator.app/Contents/Resources/lib/python3.10/PyQt6/Qt6/lib/QtWidgets.framework/Versions/A/QtWidgets" || echo "QtWidgets not found at expected path"
+          
+          # Create DMG for Intel
+          create-dmg \
+            --volname "SubtitleTranslator-Intel" \
+            --volicon "assets/icon.icns" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "SubtitleTranslator.app" 200 190 \
+            --hide-extension "SubtitleTranslator.app" \
+            --app-drop-link 600 185 \
+            "../dist/SubtitleTranslator-Intel.dmg" \
+            "dist/SubtitleTranslator.app" \
+          || echo "DMG creation may have warnings, continuing..."
+          
+          # Deactivate virtual environment
+          deactivate
+          cd ..
+
+      - name: Upload Intel DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubtitleTranslator-Intel-dmg
+          path: dist/SubtitleTranslator-Intel.dmg
