@@ -777,13 +777,15 @@ Return the subtitles in the same exact format and order, with the same numbering
 2. 确保每条字幕语义完整，长度适中（每行不超过42个字符）
 3. 使用术语表中的标准翻译
 4. 考虑时间轴信息，为每条字幕进行时间轴优化
-5. 合并过短的字幕，拆分过长的字幕
-6. 以结构化数据格式返回结果，包含原文、时间轴和翻译
-7. 保留完整的原文内容，不要修改原文
-8. 确保原文和翻译都包含在最终输出中
+5. 优化时间轴时，请确保每个句子显示时长与原字幕中一致，尽量与原字幕时间轴匹配，尤其是未合并也未拆分的句子时间轴应保持不变
+6. 合并过短的字幕，拆分过长的字幕
+7. 调整断句时，要将原文和译文联合考虑，使最终的原文和译文行数相同
+8. 以结构化数据格式返回结果，包含原文、时间轴和翻译
+9. 保留完整的原文内容，不要修改原文
+10. 确保原文和翻译都包含在最终输出中
 """
 
-            user_prompt = f"""请根据以下字幕的初步翻译和时间轴信息进行最终优化和调整。确保字幕语义完整、长度适中，且与时间轴匹配：
+            user_prompt = f"""请根据以下字幕的初步翻译和时间轴信息进行最终优化和调整。确保字幕语义完整、长度适中，且与原字幕时间轴匹配：
 
 """
             for idx, (sub, first_trans) in enumerate(zip(batch, first_pass_batch)):
@@ -2930,10 +2932,16 @@ class TranslationWorker(QThread):
         signals.progress.emit(f"开始多阶段翻译，共 {len(self.subtitles)} 条字幕...")
         
         try:
-            # 创建API客户端
-            api_client = await self.test_api_connection()
-            if not api_client:
+            # 测试API连接
+            api_connection_successful = await self.test_api_connection()
+            if not api_connection_successful:
                 signals.error.emit("API连接测试失败，请检查API密钥和主机地址")
+                return
+                
+            # 创建API客户端
+            api_client = self.create_api_client()
+            if not api_client:
+                signals.error.emit("无法创建API客户端")
                 return
                 
             signals.progress.emit("API连接测试成功，开始多阶段翻译流程...")
@@ -2986,7 +2994,25 @@ class TranslationWorker(QThread):
             if terminology_dict:
                 self.add_custom_terminology(terminology_dict)
             
+            # 执行最终错误校正
+            signals.progress.emit("开始执行最终错误校正...")
+            error_correction_result = await self.final_error_correction(api_client)
+            
             # 从缓存文件写入字幕文件
+            if error_correction_result:
+                # 更新缓存文件中的翻译
+                cache_data = {
+                    "translations": SubtitleProcessor.serialize_for_json(self.translations),
+                    "subtitles": SubtitleProcessor.serialize_for_json(self.subtitles),
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(cache_data, f, ensure_ascii=False, indent=2)
+                
+                signals.progress.emit(f"已将错误校正后的翻译结果更新到缓存文件")
+            
+            # 写入字幕文件
             self.write_subtitles_from_cache(self.output_file, cache_file)
             
         except Exception as e:
@@ -3002,10 +3028,16 @@ class TranslationWorker(QThread):
         signals.progress.emit(f"开始标准翻译，共 {len(self.subtitles)} 条字幕...")
         
         try:
-            # 创建API客户端
-            api_client = await self.test_api_connection()
-            if not api_client:
+            # 测试API连接
+            api_connection_successful = await self.test_api_connection()
+            if not api_connection_successful:
                 signals.error.emit("API连接测试失败，请检查API密钥和主机地址")
+                return
+                
+            # 创建API客户端
+            api_client = self.create_api_client()
+            if not api_client:
+                signals.error.emit("无法创建API客户端")
                 return
                 
             signals.progress.emit("API连接测试成功，开始翻译...")
@@ -3140,16 +3172,38 @@ class TranslationWorker(QThread):
                 # 将翻译结果存入实例变量
                 self.translations = translations
                 
+                # 执行最终错误校正
+                signals.progress.emit("开始执行最终错误校正...")
+                error_correction_result = await self.final_error_correction(api_client)
+                
+                # 更新缓存数据以包含修复后的翻译
+                if error_correction_result:
+                    # 创建新的缓存数据包含修复后的翻译
+                    new_cache_data = {
+                        "translations": {},
+                        "failed_indices": self.failed_indices
+                    }
+                    
+                    # 将修复后的翻译添加到新的缓存
+                    for i, trans in enumerate(self.translations):
+                        new_cache_data["translations"][str(i+1)] = trans
+                    
+                    # 写入更新后的缓存
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(new_cache_data, f, ensure_ascii=False, indent=2)
+                    
+                    signals.progress.emit("已更新缓存文件，包含错误校正后的翻译")
+                
                 # 生成翻译后的字幕
                 translated_subs = []
                 
                 for i, sub in enumerate(self.subtitles):
-                    if i >= len(translations):
+                    if i >= len(self.translations):
                         signals.progress.emit(f"警告: 字幕 {i+1} 没有对应的翻译")
                         continue
                         
                     # 获取翻译文本
-                    translation = translations[i]
+                    translation = self.translations[i]
                     
                     # 处理翻译文本
                     original_content = sub['content'].strip()
@@ -3436,6 +3490,184 @@ class TranslationWorker(QThread):
         # 如果上述方法都不成功，截断文本
         return self.truncate_chinese_text(text, 25)
 
+    async def final_error_correction(self, api_client):
+        """最终错误校正阶段：检测并修复未翻译或异常的字幕"""
+        self.worker_signals.progress.emit("开始最终错误校正阶段...")
+        
+        # 检查是否有字幕和翻译结果
+        if not hasattr(self, 'subtitles') or not hasattr(self, 'translations') or not self.subtitles or not self.translations:
+            self.worker_signals.error.emit("没有可用的字幕或翻译进行错误校正")
+            return False
+        
+        try:
+            # 找出需要修复的字幕索引
+            problematic_indices = []
+            total_subtitles = len(self.subtitles)
+            batch_size = self.config.batch_size if hasattr(self.config, 'batch_size') else 40
+            
+            self.worker_signals.progress.emit(f"检查 {total_subtitles} 条字幕中的错误...")
+            
+            # 分批次检查字幕
+            for i in range(0, total_subtitles, batch_size):
+                if self.should_stop:
+                    self.worker_signals.progress.emit("检测到停止请求，正在终止错误校正...")
+                    return False
+                    
+                batch_end = min(i + batch_size, total_subtitles)
+                self.worker_signals.progress.emit(f"检查第 {i+1}-{batch_end} 条字幕...")
+                
+                # 检查每一条字幕
+                for j in range(i, batch_end):
+                    if j >= len(self.translations):
+                        continue
+                        
+                    translation = self.translations[j]
+                    
+                    # 检查是否包含"未翻译"或以#开头
+                    if isinstance(translation, str):
+                        if "未翻译" in translation or translation.strip().startswith("#"):
+                            problematic_indices.append(j)
+                    elif isinstance(translation, dict) and "translation" in translation:
+                        if "未翻译" in translation["translation"] or translation["translation"].strip().startswith("#"):
+                            problematic_indices.append(j)
+            
+            if not problematic_indices:
+                self.worker_signals.progress.emit("未发现需要修复的错误字幕，最终校正阶段完成！")
+                return True
+                
+            self.worker_signals.progress.emit(f"发现 {len(problematic_indices)} 条需要修复的字幕，开始修复...")
+            
+            # 对每个有问题的字幕进行修复
+            fixed_count = 0
+            for idx in problematic_indices:
+                if self.should_stop:
+                    self.worker_signals.progress.emit("检测到停止请求，正在终止错误修复...")
+                    return False
+                
+                # 获取上下文（前后各10行字幕）
+                context_start = max(0, idx - 10)
+                context_end = min(total_subtitles, idx + 11)
+                context_subtitles = self.subtitles[context_start:context_end]
+                
+                # 构建字幕格式
+                subtitle_blocks = []
+                for i, sub in enumerate(context_subtitles):
+                    original_idx = context_start + i
+                    
+                    # 获取原文和当前翻译
+                    original_content = sub['content']
+                    
+                    trans = self.translations[original_idx] if original_idx < len(self.translations) else ""
+                    if isinstance(trans, dict):
+                        current_translation = trans.get("translation", "")
+                    else:
+                        current_translation = trans
+                    
+                    # 格式化时间码
+                    start_time = format_timecode(sub['start'].total_seconds())
+                    end_time = format_timecode(sub['end'].total_seconds())
+                    
+                    # 创建字幕块
+                    subtitle_block = f"{original_idx + 1}\n{start_time} --> {end_time}\n{current_translation}\n{original_content}\n"
+                    subtitle_blocks.append(subtitle_block)
+                
+                subtitle_text = "\n".join(subtitle_blocks)
+                
+                # 构建系统提示和用户提示
+                system_message = """你是一位专业的字幕翻译修复专家。
+请修复以下字幕中存在问题的部分（标记为"未翻译"或以"#"开头的行）。
+
+请遵循以下规则:
+1. 只修改有问题的字幕行，如果有需要，有问题行的前后3行也可以进行修改调整以优化断句，但其他行应保持不变
+2. 使用上下文理解内容，确保翻译的连贯性和准确性
+3. 返回完整的修复后字幕块，包括未修改的行
+4. 确保每条字幕格式与原格式一致
+5. 如果是双语字幕（包含原文和译文），保持双语格式
+6. 修复后的字幕应与上下文保持一致的语言风格
+7. 确保时间轴信息正确（按照格式：小时:分钟:秒,毫秒）
+8. 不要添加任何额外的解释、注释或前缀
+9. 只返回修复后的字幕块，不要包含其他内容
+
+必须严格按照以下格式返回结果:
+
+<translation index="1">修复后的译文1</translation>
+<translation index="2">修复后的译文2</translation>
+...
+
+注意事项：
+- 只返回需要修复的字幕，不需要返回没有问题的字幕
+- index是字幕的序号，应该与原字幕序号一致
+- 不要添加任何额外的解释或注释，只返回XML标签包裹的翻译内容
+- 不要包含时间轴信息或原文内容，只需要返回翻译文本
+- 不要使用Markdown格式或其他标记语言"""
+
+                user_message = f"""以下是需要检查和修复的字幕块（每个字幕块包含字幕序号、时间码、译文和原文）：
+
+{subtitle_text}
+
+请识别并修复含有"未翻译"字样或以"#"开头的字幕行。
+
+仅输出修复后的字幕翻译结果，使用以下XML格式：
+<translation index="字幕序号">修复后的译文</translation>
+
+示例：
+<translation index="1272">在争吵中对方</translation>
+<translation index="1273">在争吵中</translation>
+
+注意：
+1. 只输出需要修复的字幕，不需要输出没有问题的字幕
+2. 字幕序号必须与原字幕序号完全匹配
+3. 不要包含任何解释、注释或其他内容
+4. 不要输出时间轴信息或原文，只输出译文"""
+
+                try:
+                    # 发送请求
+                    response = await api_client.chat(system_message + "\n\n" + user_message)
+                    
+                    # 解析响应，提取修复后的翻译
+                    fixed_translations = self.parse_fixed_translations(response)
+                    
+                    if fixed_translations:
+                        # 更新翻译结果
+                        for fixed_idx, fixed_text in fixed_translations.items():
+                            idx_num = int(fixed_idx) - 1  # 转换为0-based索引
+                            
+                            if idx_num < len(self.translations):
+                                if isinstance(self.translations[idx_num], dict):
+                                    self.translations[idx_num]["translation"] = fixed_text
+                                else:
+                                    self.translations[idx_num] = fixed_text
+                                    
+                                fixed_count += 1
+                                self.worker_signals.progress.emit(f"已修复字幕 {fixed_idx}: {fixed_text}")
+                    
+                    # 等待一段时间再发送下一个请求
+                    await asyncio.sleep(self.config.delay)
+                    
+                except Exception as e:
+                    self.worker_signals.error.emit(f"修复字幕 {idx+1} 时出错: {str(e)}")
+                    continue
+            
+            self.worker_signals.progress.emit(f"最终错误校正完成，共修复 {fixed_count} 条字幕！")
+            return True
+            
+        except Exception as e:
+            self.worker_signals.error.emit(f"最终错误校正过程中出错: {str(e)}")
+            return False
+    
+    def parse_fixed_translations(self, response):
+        """解析修复后的翻译响应"""
+        fixed_translations = {}
+        
+        # 使用正则表达式匹配<translation index="数字">内容</translation>格式
+        pattern = r'<translation index="(\d+)">(.*?)</translation>'
+        matches = re.findall(pattern, response, re.DOTALL)
+        
+        for idx, text in matches:
+            fixed_translations[idx] = text.strip()
+        
+        return fixed_translations
+
 
 class TitleBarButton(QPushButton):
     """自定义标题栏按钮"""
@@ -3532,7 +3764,7 @@ class AboutDialog(QWidget):
         content_layout.addWidget(title_label)
 
         # 版本
-        version_label = QLabel("Version 2.0.0")
+        version_label = QLabel("Version 2.0.1")
         version_label.setFont(QFont("Arial", 12))
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         content_layout.addWidget(version_label)
@@ -3900,7 +4132,7 @@ class SubtitleTranslatorApp(QMainWindow):
         header_title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
 
         # 版本
-        version_label = QLabel("v2.0.0")
+        version_label = QLabel("v2.0.1")
         version_label.setFont(QFont("Arial", 9))
         version_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
