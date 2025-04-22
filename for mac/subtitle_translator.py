@@ -308,24 +308,24 @@ class SubtitleProcessor:
         
         # 处理带有破折号前缀的听障字幕，如 "- [light steps]"
         dash_pattern = r'^\s*-\s*\[.*?\]'
-        if re.match(dash_pattern, text):
+        if re.match(dash_pattern, text, re.DOTALL):
             # 检查是否整行都是类似格式 (可能有多行，每行都是破折号+方括号格式)
             lines = text.split('\n')
-            all_lines_are_dash_hi = all(re.match(r'^\s*-\s*\[.*?\]', line.strip()) for line in lines if line.strip())
+            all_lines_are_dash_hi = all(re.match(r'^\s*-\s*\[.*?\]', line.strip(), re.DOTALL) for line in lines if line.strip())
             if all_lines_are_dash_hi:
                 return ""  # 如果整个字幕都是破折号+听障内容，直接返回空
         
         # 清理带有破折号前缀的听障标记
-        cleaned_text = re.sub(r'\s*-\s*\[.*?\]', '', text)
+        cleaned_text = re.sub(r'\s*-\s*\[.*?\]', '', text, flags=re.DOTALL)
         
         # 清理所有方括号内的内容，这包括所有听障字幕标记
-        cleaned_text = re.sub(r'\[.*?\]', '', cleaned_text)
+        cleaned_text = re.sub(r'\[.*?\]', '', cleaned_text, flags=re.DOTALL)
         
         # 也处理常见的听障标记格式，如 (音乐) (鼓掌)
-        cleaned_text = re.sub(r'\(.*?\)', '', cleaned_text)
+        cleaned_text = re.sub(r'\(.*?\)', '', cleaned_text, flags=re.DOTALL)
         
         # 处理其他常见格式，如 *笑声* 或 #音乐#
-        cleaned_text = re.sub(r'[*#].*?[*#]', '', cleaned_text)
+        cleaned_text = re.sub(r'[*#].*?[*#]', '', cleaned_text, flags=re.DOTALL)
         
         # 处理带有破折号前缀的听障词汇，如 "- Music" or "- 音乐"
         cleaned_text = re.sub(r'^\s*-\s*(音乐|音效|笑声|掌声|叹息|喘息|脚步声|门响|电话铃|引擎声|Music|Sound|Laughter|Applause|Sighs|Breathing|Footsteps|Door|Phone|Engine)$', '', cleaned_text, flags=re.IGNORECASE|re.MULTILINE)
@@ -2071,7 +2071,7 @@ class TranslationWorker(QThread):
         content = re.sub(r'^["""「『』」""\'\'\']+|["""「『』」""\'\'\']+$', '', content).strip()
         
         # 移除可能的注释
-        content = re.sub(r'\(.*?\)|\[.*?\]', '', content).strip()
+        content = re.sub(r'\(.*?\)|\[.*?\]', '', content, flags=re.DOTALL).strip()
         
         return content
 
